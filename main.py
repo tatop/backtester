@@ -217,3 +217,92 @@ class BacktestEngine:
         self.nav_history.append(self.current_nav)
         self.weight_history.append(dict(zip(self.symbols, (self.positions * prices) / self.current_nav)))
         self.trades_history.append({"date": date, **dict(zip(self.symbols, trades))})
+
+def compute_returns(nav_series: pd.Series) -> pd.Series:
+    """Calcola i rendimenti periodali dal NAV."""
+    if nav_series.size < 2:
+        return pd.Series(dtype=float)
+
+    nav_values = nav_series.to_numpy(dtype=float)
+    returns = nav_values[1:] / nav_values[:-1] - 1.0
+    return pd.Series(returns, index=nav_series.index[1:], name="returns")
+
+
+def compute_total_return(nav_series: pd.Series) -> float:
+    """Calcola il rendimento totale sul periodo di backtest."""
+    if nav_series.empty:
+        return float("nan")
+    start, end = float(nav_series.iloc[0]), float(nav_series.iloc[-1])
+    return end / start - 1.0
+
+
+def compute_cagr(nav_series: pd.Series) -> float:
+    """Calcola il CAGR."""
+    if nav_series.size < 2:
+        return float("nan")
+
+    start, end = float(nav_series.iloc[0]), float(nav_series.iloc[-1])
+    if start <= 0:
+        return float("nan")
+
+    idx = nav_series.index
+    years = nav_series.size / 252
+    if isinstance(idx, (pd.DatetimeIndex, pd.PeriodIndex, pd.TimedeltaIndex)):
+        start_date = idx[0].to_timestamp() if isinstance(idx, pd.PeriodIndex) else pd.Timestamp(idx[0])
+        end_date = idx[-1].to_timestamp() if isinstance(idx, pd.PeriodIndex) else pd.Timestamp(idx[-1])
+        elapsed_days = (end_date - start_date).days
+        if elapsed_days > 0:
+            years = elapsed_days / 365.25
+
+    return (end / start) ** (1.0 / years) - 1.0 if years > 0 else float("nan")
+
+
+def compute_annualized_volatility(nav_series: pd.Series, periods_per_year: int = 252) -> float:
+    """Calcola la volatilità annualizzata."""
+    returns = compute_returns(nav_series)
+    if returns.empty:
+        return float("nan")
+
+    ret_values = returns.to_numpy(dtype=float)
+    vol = np.nanstd(ret_values, ddof=0)
+    return vol * np.sqrt(periods_per_year)
+
+
+def compute_max_drawdown(nav_series: pd.Series) -> float:
+    """Calcola il massimo drawdown."""
+    if nav_series.empty:
+        return float("nan")
+
+    nav_values = nav_series.to_numpy(dtype=float)
+    cum_max = np.maximum.accumulate(nav_values)
+    drawdowns = nav_values / cum_max - 1.0
+    return float(drawdowns.min())
+
+
+def compute_sharpe_ratio(
+    nav_series: pd.Series,
+    risk_free_rate: float = 0.0,
+    periods_per_year: int = 252,
+) -> float:
+    """Calcola lo Sharpe ratio."""
+    returns = compute_returns(nav_series)
+    if returns.empty:
+        return float("nan")
+
+    rf_per_period = risk_free_rate / periods_per_year
+    excess = returns.to_numpy(dtype=float) - rf_per_period
+    std = np.nanstd(excess, ddof=0)
+    if std == 0:
+        return float("nan")
+    return float(np.nanmean(excess) / std * np.sqrt(periods_per_year))
+
+
+def compute_all_metrics(nav_series: pd.Series) -> dict:
+    """Restituisce tutte le metriche principali in un dizionario."""
+    return {
+        "total_return": compute_total_return(nav_series),
+        "cagr": compute_cagr(nav_series),
+        "volatility": compute_annualized_volatility(nav_series),
+        "max_drawdown": compute_max_drawdown(nav_series),
+        "sharpe_ratio": compute_sharpe_ratio(nav_series),
+    }
