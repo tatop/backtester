@@ -1,5 +1,5 @@
+import argparse
 from pathlib import Path
-
 import numpy as np
 import pandas as pd
 from dataclasses import dataclass
@@ -365,4 +365,70 @@ def plot_backtest_dashboard(nav_series: pd.Series, weights_df: pd.DataFrame = No
     return layout
 
 
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Esegui un backtest di portafoglio statico.")
+    parser.add_argument("--symbols", nargs="+", help="Ticker/nomi degli ETF (es. SPY STOXX50).")
+    parser.add_argument("--weights", nargs="+", type=float, help="Pesi corrispondenti (somma=1).")
+    parser.add_argument("--initial", type=float, default=10_000.0, help="Capitale iniziale (default: 10000).")
+    parser.add_argument(
+        "--rebalance",
+        choices=["none", "monthly", "quarterly", "yearly"],
+        default="yearly",
+        help="Frequenza di ribilanciamento (default: yearly).",
+    )
+    parser.add_argument(
+        "--transaction-cost",
+        type=float,
+        default=0.001,
+        help="Costo di transazione (default: 0.001 = 0.1%%).",
+    )
+    parser.add_argument("--data-dir", default="data", help="Directory dei CSV (default: data).")
+    parser.add_argument(
+        "--align",
+        choices=["inner", "outer", "ffill", "bfill"],
+        default="inner",
+        help="Metodo di allineamento serie (default: inner).",
+    )
+    parser.add_argument("--plot", action="store_true", help="Mostra i grafici Bokeh.")
+    return parser.parse_args()
 
+
+def _build_weights(symbols: list[str], weights: Optional[list[float]]) -> dict:
+    if weights is None:
+        # Default: pesi uguali se non specificati.
+        equal_weight = 1.0 / len(symbols)
+        weights = [equal_weight] * len(symbols)
+    if len(weights) != len(symbols):
+        raise ValueError("Il numero di pesi deve corrispondere al numero di simboli.")
+    return {sym: float(w) for sym, w in zip(symbols, weights)}
+
+
+def run_cli_backtest() -> None:
+    args = _parse_args()
+
+    symbols = args.symbols or ["SPY", "STOXX50"]
+    weights = _build_weights(symbols, args.weights)
+
+    prices = load_multiple_symbols(symbols, data_dir=args.data_dir)
+    prices = align_price_data(prices, method=args.align)
+
+    engine = BacktestEngine(
+        prices_df=prices,
+        portfolio_config=PortfolioConfig(weights=weights, initial_capital=args.initial),
+        params=BacktestParams(rebalance_frequency=args.rebalance, transaction_cost=args.transaction_cost),
+    )
+    result = engine.run()
+
+    metrics = compute_all_metrics(result.nav_series)
+    print("Backtest Results")
+    print("----------------")
+    for k, v in metrics.items():
+        print(f"{k.replace('_', ' ').title()}: {v}")
+    print(f"Final NAV: {result.metrics['final_nav']:.2f}")
+
+    if args.plot:
+        plot_backtest_dashboard(result.nav_series, result.weights_over_time)
+
+
+if __name__ == "__main__":
+    run_cli_backtest()

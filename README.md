@@ -13,7 +13,7 @@ The project supports:
 * CLI usage
 * Interactive visualizations (via Bokeh)
 
----
+
 
 ## Features
 
@@ -51,7 +51,7 @@ The project supports:
 * Output results to stdout.
 * Optional flag to display interactive charts in the browser.
 
----
+
 
 ## Project Structure
 
@@ -105,7 +105,7 @@ Date,Close
 
 ---
 
-## Usage (CLI) not yet implemented
+## Usage (CLI)
 
 Run a full backtest from the command line:
 
@@ -157,7 +157,7 @@ If `--plot` is used:
 * The NAV curve will open in your browser
 * Additional plots available (e.g., weights over time)
 
----
+
 
 ## Extending the Framework
 
@@ -170,10 +170,11 @@ Some possible extensions:
 * Monte Carlo simulations
 * Custom rebalancing rules (e.g., tolerance bands)
 * Transaction cost models
+* Risk parity portfolios
 
 Each module is intentionally simple, with clear interfaces that allow progressive sophistication.
 
----
+
 
 ## Contributing
 
@@ -183,17 +184,4 @@ Each module is intentionally simple, with clear interfaces that allow progressiv
 
 All code should follow a clean modular structure consistent with the existing layout.
 
----
 
-## License
-
-Specify a license here (MIT recommended).
-
----
-
-If you'd like, I can also prepare:
-
-* A `requirements.txt`
-* A sample `main.py`
-* Example CSV files
-* A version of the README tailored to a specific GitHub repository name.
