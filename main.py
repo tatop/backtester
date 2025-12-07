@@ -257,15 +257,19 @@ def compute_cagr(nav_series: pd.Series) -> float:
     return (end / start) ** (1.0 / years) - 1.0 if years > 0 else float("nan")
 
 
-def compute_annualized_volatility(nav_series: pd.Series, periods_per_year: int = 252) -> float:
-    """Calcola la volatilità annualizzata."""
+def compute_annualized_volatility(nav_series: pd.Series, periods_per_year: int = 12) -> float:
+    """Calcola la volatilità annualizzata con deviazione standard campionaria."""
     returns = compute_returns(nav_series)
-    if returns.empty:
+    if returns.size < 2:
         return float("nan")
 
     ret_values = returns.to_numpy(dtype=float)
-    vol = np.nanstd(ret_values, ddof=0)
-    return vol * np.sqrt(periods_per_year)
+    valid_obs = np.count_nonzero(~np.isnan(ret_values))
+    if valid_obs < 2:
+        return float("nan")
+
+    vol = np.nanstd(ret_values, ddof=1)
+    return float(vol * np.sqrt(periods_per_year) * 100.0)
 
 
 def compute_max_drawdown(nav_series: pd.Series) -> float:
@@ -278,31 +282,37 @@ def compute_max_drawdown(nav_series: pd.Series) -> float:
     drawdowns = nav_values / cum_max - 1.0
     return float(drawdowns.min())
 
-
+# Sharpe = (CAGR - Tasso Risk-Free) / Volatilità
 def compute_sharpe_ratio(
     nav_series: pd.Series,
-    risk_free_rate: float = 0.0,
+    risk_free_rate: float = 0.002,
     periods_per_year: int = 252,
 ) -> float:
     """Calcola lo Sharpe ratio."""
-    returns = compute_returns(nav_series)
-    if returns.empty:
+    cagr = compute_cagr(nav_series)
+    if cagr == 0:
         return float("nan")
 
-    rf_per_period = risk_free_rate / periods_per_year
-    excess = returns.to_numpy(dtype=float) - rf_per_period
-    std = np.nanstd(excess, ddof=0)
-    if std == 0:
+    vol = compute_annualized_volatility(nav_series) / 100
+    if vol == 0:
         return float("nan")
-    return float(np.nanmean(excess) / std * np.sqrt(periods_per_year))
+    return float((cagr - risk_free_rate) / vol)
 
 
 def compute_all_metrics(nav_series: pd.Series) -> dict:
     """Restituisce tutte le metriche principali in un dizionario."""
     return {
-        "total_return": compute_total_return(nav_series),
-        "cagr": compute_cagr(nav_series),
-        "volatility": compute_annualized_volatility(nav_series),
-        "max_drawdown": compute_max_drawdown(nav_series),
-        "sharpe_ratio": compute_sharpe_ratio(nav_series),
+        "total_return": f"{compute_total_return(nav_series):.2%}",
+        "cagr": f"{compute_cagr(nav_series):.2%}",
+        "volatility": f"{compute_annualized_volatility(nav_series):.2f}%",
+        "max_drawdown": f"{compute_max_drawdown(nav_series):.2%}",
+        "sharpe_ratio": f"{compute_sharpe_ratio(nav_series):.2f}",
     }
+
+def main():
+    nav_series = pd.read_csv("data/SPY.csv", index_col=0, parse_dates=True)["close"]
+    metrics = compute_all_metrics(nav_series)
+    print(metrics)
+
+if __name__ == "__main__":
+    main()
