@@ -4,6 +4,10 @@ import numpy as np
 import pandas as pd
 from dataclasses import dataclass
 from typing import Dict, Optional
+from bokeh.plotting import figure, show
+from bokeh.layouts import column
+from bokeh.models import HoverTool
+from bokeh.palettes import Category10
 
 def load_price_series(symbol: str, data_dir: str = "data") -> pd.Series:
     """Carica la serie dei prezzi per un singolo ETF da file CSV."""
@@ -309,10 +313,56 @@ def compute_all_metrics(nav_series: pd.Series) -> dict:
         "sharpe_ratio": f"{compute_sharpe_ratio(nav_series):.2f}",
     }
 
-def main():
-    nav_series = pd.read_csv("data/SPY.csv", index_col=0, parse_dates=True)["close"]
-    metrics = compute_all_metrics(nav_series)
-    print(metrics)
+def plot_backtest_dashboard(nav_series: pd.Series, weights_df: pd.DataFrame = None):
+    """Crea un dashboard con equity curve, drawdown e pesi del portafoglio."""
+    dates = nav_series.index
 
-if __name__ == "__main__":
-    main()
+    p1 = figure(
+        title="Equity Curve",
+        x_axis_type="datetime",
+        height=250,
+        sizing_mode="stretch_width",
+    )
+    p1.line(dates, nav_series.values, line_width=2, color="navy", legend_label="NAV")
+    p1.add_tools(HoverTool(tooltips=[("Date", "@x{%F}"), ("NAV", "@y{0,0.00}")], formatters={"@x": "datetime"}))
+    p1.legend.location = "top_left"
+
+    nav_values = nav_series.to_numpy(dtype=float)
+    cum_max = np.maximum.accumulate(nav_values)
+    drawdowns = (nav_values / cum_max - 1.0) * 100
+
+    p2 = figure(
+        title="Drawdown (%)",
+        x_axis_type="datetime",
+        height=200,
+        sizing_mode="stretch_width",
+        x_range=p1.x_range,
+    )
+    p2.varea(x=dates, y1=0, y2=drawdowns, fill_color="crimson", fill_alpha=0.6)
+    p2.line(dates, drawdowns, line_width=1, color="darkred")
+    p2.add_tools(HoverTool(tooltips=[("Date", "@x{%F}"), ("DD", "@y{0.00}%")], formatters={"@x": "datetime"}))
+
+    if weights_df is not None and not weights_df.empty:
+        p3 = figure(
+            title="Portfolio Weights",
+            x_axis_type="datetime",
+            height=200,
+            sizing_mode="stretch_width",
+            x_range=p1.x_range,
+        )
+        symbols = weights_df.columns.tolist()
+        colors = Category10[max(3, len(symbols))][:len(symbols)]
+        for i, sym in enumerate(symbols):
+            p3.line(weights_df.index, weights_df[sym].values, line_width=2, color=colors[i], legend_label=sym)
+        p3.legend.location = "top_left"
+        p3.legend.click_policy = "hide"
+        p3.add_tools(HoverTool(tooltips=[("Date", "@x{%F}"), ("Weight", "@y{0.00%}")], formatters={"@x": "datetime"}))
+        layout = column(p1, p2, p3, sizing_mode="stretch_width")
+    else:
+        layout = column(p1, p2, sizing_mode="stretch_width")
+
+    show(layout)
+    return layout
+
+
+
