@@ -185,10 +185,11 @@ class BacktestEngine:
             raise ValueError("Frequenza di rebalance non riconosciuta.")
 
         idx = self.prices_df.index
-        periods = idx.to_period(period_map[freq])
+        # Converto in Series per usare shift posizionale (PeriodIndex.shift() sposta di 1 periodo nel tempo)
+        periods = pd.Series(idx.to_period(period_map[freq]), index=idx)
         change_mask = periods != periods.shift(1)
         # Escludi la prima data (già inizializzata).
-        return list(idx[change_mask][1:])
+        return list(periods.index[change_mask][1:])
 
     def _step_without_rebalance(self, date) -> None:
         """Aggiorna il valore del portafoglio in una data senza ribilanciamento."""
@@ -205,6 +206,8 @@ class BacktestEngine:
         weights_vec = np.array([self.weights[s] for s in self.symbols])
 
         current_values = self.positions * prices
+        # Aggiorna il NAV con i prezzi correnti prima di calcolare i nuovi target.
+        self.current_nav = float(current_values.sum())
         target_values = self.current_nav * weights_vec
 
         turnover = np.abs(target_values - current_values).sum()
