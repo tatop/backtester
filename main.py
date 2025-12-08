@@ -5,8 +5,8 @@ import pandas as pd
 from dataclasses import dataclass
 from typing import Dict, Optional
 from bokeh.plotting import figure, show
-from bokeh.layouts import column
-from bokeh.models import HoverTool
+from bokeh.layouts import column, row
+from bokeh.models import ColumnDataSource, HoverTool, NumeralTickFormatter, Div
 from bokeh.palettes import Category10
 
 def load_price_series(symbol: str, data_dir: str = "data") -> pd.Series:
@@ -320,6 +320,40 @@ def plot_backtest_dashboard(nav_series: pd.Series, weights_df: pd.DataFrame = No
     """Crea un dashboard con equity curve, drawdown e pesi del portafoglio."""
     dates = nav_series.index
 
+    metrics_cards = []
+    metrics_info = {
+        "CAGR": (compute_cagr(nav_series), "{:.2%}", "#0ea5e9"),
+        "Volatility": (compute_annualized_volatility(nav_series), "{:.2f}%", "#22c55e"),
+        "Max Drawdown": (compute_max_drawdown(nav_series), "{:.2%}", "#f97316"),
+        "Sharpe Ratio": (compute_sharpe_ratio(nav_series), "{:.2f}", "#eab308"),
+    }
+
+    for title, (value, fmt, accent) in metrics_info.items():
+        display_value = "—" if pd.isna(value) else fmt.format(value)
+        metrics_cards.append(
+            Div(
+                text=f"""
+<div style="
+    background:#0f172a;
+    color:#e2e8f0;
+    border-radius:10px;
+    padding:12px 16px;
+    box-shadow:0 2px 8px rgba(0,0,0,0.15);
+    border-top:4px solid {accent};
+">
+  <div style="font-size:12px; letter-spacing:0.5px; text-transform:uppercase; color:#94a3b8; font-weight:700;">
+    {title}
+  </div>
+  <div style="font-size:28px; font-weight:800; margin-top:8px; color:#e2e8f0;">
+    {display_value}
+  </div>
+</div>
+""",
+                width=220,
+            )
+        )
+    metrics_row = row(*metrics_cards, sizing_mode="stretch_width")
+
     p1 = figure(
         title="Equity Curve",
         x_axis_type="datetime",
@@ -352,17 +386,32 @@ def plot_backtest_dashboard(nav_series: pd.Series, weights_df: pd.DataFrame = No
             height=200,
             sizing_mode="stretch_width",
             x_range=p1.x_range,
+            y_range=(0, 1),
         )
         symbols = weights_df.columns.tolist()
         colors = Category10[max(3, len(symbols))][:len(symbols)]
-        for i, sym in enumerate(symbols):
-            p3.line(weights_df.index, weights_df[sym].values, line_width=2, color=colors[i], legend_label=sym)
+        weights_source = ColumnDataSource(weights_df.assign(date=weights_df.index))
+        p3.varea_stack(
+            stackers=symbols,
+            x="date",
+            color=colors,
+            alpha=0.8,
+            legend_label=symbols,
+            source=weights_source,
+        )
+        p3.yaxis.formatter = NumeralTickFormatter(format="0%")
         p3.legend.location = "top_left"
         p3.legend.click_policy = "hide"
-        p3.add_tools(HoverTool(tooltips=[("Date", "@x{%F}"), ("Weight", "@y{0.00%}")], formatters={"@x": "datetime"}))
-        layout = column(p1, p2, p3, sizing_mode="stretch_width")
+        p3.add_tools(
+            HoverTool(
+                tooltips=[("Date", "@date{%F}"), ("Asset", "$name"), ("Weight", "@$name{0.00%}")],
+                formatters={"@date": "datetime"},
+                mode="vline",
+            )
+        )
+        layout = column(metrics_row, p1, p2, p3, sizing_mode="stretch_width")
     else:
-        layout = column(p1, p2, sizing_mode="stretch_width")
+        layout = column(metrics_row, p1, p2, sizing_mode="stretch_width")
 
     show(layout)
     return layout
