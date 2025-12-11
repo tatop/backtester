@@ -1,4 +1,5 @@
 import argparse
+from pathlib import Path
 
 from backtest.metrics import compute_all_metrics
 from backtest.plotting import plot_backtest_dashboard
@@ -8,10 +9,21 @@ from backtest.engine import BacktestEngine, BacktestParams
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Esegui un backtest di portafoglio statico.")
-    parser.add_argument("--symbols", nargs="+", help="Ticker/nomi degli ETF (es. SPY STOXX50).")
-    parser.add_argument("--weights", nargs="+", type=float, help="Pesi corrispondenti (somma=1).")
-    parser.add_argument("--initial", type=float, default=10_000.0, help="Capitale iniziale (default: 10000).")
+    parser = argparse.ArgumentParser(
+        description="Esegui un backtest di portafoglio statico."
+    )
+    parser.add_argument(
+        "--symbols", nargs="+", help="Ticker/nomi degli ETF (es. SPY STOXX50)."
+    )
+    parser.add_argument(
+        "--weights", nargs="+", type=float, help="Pesi corrispondenti (somma=1)."
+    )
+    parser.add_argument(
+        "--initial",
+        type=float,
+        default=10_000.0,
+        help="Capitale iniziale (default: 10000).",
+    )
     parser.add_argument(
         "--rebalance",
         choices=["none", "monthly", "quarterly", "yearly"],
@@ -24,7 +36,9 @@ def parse_args() -> argparse.Namespace:
         default=0.001,
         help="Costo di transazione (default: 0.001 = 0.1%%).",
     )
-    parser.add_argument("--data-dir", default="data", help="Directory dei CSV (default: data).")
+    parser.add_argument(
+        "--data-dir", default="data", help="Directory dei CSV (default: data)."
+    )
     parser.add_argument(
         "--align",
         choices=["inner", "outer", "ffill", "bfill"],
@@ -32,21 +46,52 @@ def parse_args() -> argparse.Namespace:
         help="Metodo di allineamento serie (default: inner).",
     )
     parser.add_argument("--plot", action="store_true", help="Mostra i grafici Bokeh.")
-    parser.add_argument("--download", action="store_true", help="Scarica dati da Yahoo Finance prima del backtest.")
-    parser.add_argument("--start", type=str, default=None, help="Data inizio download (YYYY-MM-DD, default: 10 anni fa).")
-    parser.add_argument("--end", type=str, default=None, help="Data fine download (YYYY-MM-DD, default: oggi).")
+    parser.add_argument(
+        "--download",
+        action="store_true",
+        help="Scarica dati da Yahoo Finance prima del backtest.",
+    )
+    parser.add_argument(
+        "--start",
+        type=str,
+        default=None,
+        help="Data inizio download (YYYY-MM-DD, default: 10 anni fa).",
+    )
+    parser.add_argument(
+        "--end",
+        type=str,
+        default=None,
+        help="Data fine download (YYYY-MM-DD, default: oggi).",
+    )
     return parser.parse_args()
 
 
 def run_cli_backtest(args: argparse.Namespace) -> None:
     symbols = args.symbols or ["SPY", "STOXX50"]
-    
+
     # Download data if requested
     if args.download:
         print(f"⬇️  Scaricamento dati per {symbols}...")
-        download_yahoo(symbols, start=args.start, end=args.end, data_dir=args.data_dir)
+        try:
+            summary = download_yahoo(
+                symbols, start=args.start, end=args.end, data_dir=args.data_dir
+            )
+        except ValueError as exc:
+            raise SystemExit(f"Parametri download non validi: {exc}") from exc
+
+        if summary.errors:
+            print("⚠️  Problemi durante il download:")
+            for symbol, message in summary.errors.items():
+                print(f"   {symbol}: {message}")
         print()
-    
+
+    data_path = Path(args.data_dir)
+    missing_files = [
+        symbol for symbol in symbols if not (data_path / f"{symbol}.csv").exists()
+    ]
+    if missing_files:
+        raise SystemExit(f"Mancano i file CSV per: {', '.join(missing_files)}")
+
     weights = _build_weights(symbols, args.weights)
 
     prices = load_multiple_symbols(symbols, data_dir=args.data_dir)
@@ -55,7 +100,9 @@ def run_cli_backtest(args: argparse.Namespace) -> None:
     engine = BacktestEngine(
         prices_df=prices,
         portfolio_config=PortfolioConfig(weights=weights, initial_capital=args.initial),
-        params=BacktestParams(rebalance_frequency=args.rebalance, transaction_cost=args.transaction_cost),
+        params=BacktestParams(
+            rebalance_frequency=args.rebalance, transaction_cost=args.transaction_cost
+        ),
     )
     result = engine.run()
 

@@ -2,6 +2,7 @@ import numpy as np
 from dataclasses import dataclass
 from typing import Dict, Optional
 
+
 @dataclass
 class PortfolioConfig:
     weights: Dict[str, float]

@@ -4,10 +4,12 @@ import pandas as pd
 from backtest.portfolio import validate_weights, normalize_weights
 import numpy as np
 
+
 @dataclass
 class BacktestParams:
     rebalance_frequency: str = "none"  # "none", "monthly", "quarterly", "yearly"
-    transaction_cost: float = 0.0      # es. 0.001 = 0.1% per trade
+    transaction_cost: float = 0.0  # es. 0.001 = 0.1% per trade
+
 
 @dataclass
 class BacktestResult:
@@ -60,10 +62,23 @@ class BacktestEngine:
                 self._step_without_rebalance(date)
 
         nav_series = pd.Series(self.nav_history, index=dates, name="NAV")
-        weights_df = pd.DataFrame(self.weight_history, index=dates) if self.weight_history else None
-        trades_df = pd.DataFrame(self.trades_history).set_index("date") if self.trades_history else None
+        weights_df = (
+            pd.DataFrame(self.weight_history, index=dates)
+            if self.weight_history
+            else None
+        )
+        trades_df = (
+            pd.DataFrame(self.trades_history).set_index("date")
+            if self.trades_history
+            else None
+        )
         metrics = {"final_nav": self.nav_history[-1]} if self.nav_history else None
-        return BacktestResult(nav_series=nav_series, weights_over_time=weights_df, trades=trades_df, metrics=metrics)
+        return BacktestResult(
+            nav_series=nav_series,
+            weights_over_time=weights_df,
+            trades=trades_df,
+            metrics=metrics,
+        )
 
     def _initialize_positions(self) -> None:
         """Calcola le quote iniziali per ciascun ETF."""
@@ -78,8 +93,12 @@ class BacktestEngine:
         self.current_nav = float(np.dot(self.positions, first_prices))
 
         self.nav_history = [self.current_nav]
-        self.weight_history = [dict(zip(self.symbols, (self.positions * first_prices) / self.current_nav))]
-        self.trades_history = [{"date": self.prices_df.index[0], **dict(zip(self.symbols, self.positions))}]
+        self.weight_history = [
+            dict(zip(self.symbols, (self.positions * first_prices) / self.current_nav))
+        ]
+        self.trades_history = [
+            {"date": self.prices_df.index[0], **dict(zip(self.symbols, self.positions))}
+        ]
 
     def _generate_rebalance_dates(self) -> list[pd.Timestamp]:
         """Determina le date di ribilanciamento in base alla frequenza."""
@@ -132,6 +151,7 @@ class BacktestEngine:
         self.current_nav = float(np.dot(self.positions, prices))
 
         self.nav_history.append(self.current_nav)
-        self.weight_history.append(dict(zip(self.symbols, (self.positions * prices) / self.current_nav)))
+        self.weight_history.append(
+            dict(zip(self.symbols, (self.positions * prices) / self.current_nav))
+        )
         self.trades_history.append({"date": date, **dict(zip(self.symbols, trades))})
-

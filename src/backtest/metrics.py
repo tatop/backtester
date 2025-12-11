@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 
+
 def compute_returns(nav_series: pd.Series) -> pd.Series:
     """Calcola i rendimenti periodali dal NAV."""
     if nav_series.size < 2:
@@ -31,8 +32,16 @@ def compute_cagr(nav_series: pd.Series) -> float:
     idx = nav_series.index
     years = nav_series.size / 252
     if isinstance(idx, (pd.DatetimeIndex, pd.PeriodIndex, pd.TimedeltaIndex)):
-        start_date = idx[0].to_timestamp() if isinstance(idx, pd.PeriodIndex) else pd.Timestamp(idx[0])
-        end_date = idx[-1].to_timestamp() if isinstance(idx, pd.PeriodIndex) else pd.Timestamp(idx[-1])
+        start_date = (
+            idx[0].to_timestamp()
+            if isinstance(idx, pd.PeriodIndex)
+            else pd.Timestamp(idx[0])
+        )
+        end_date = (
+            idx[-1].to_timestamp()
+            if isinstance(idx, pd.PeriodIndex)
+            else pd.Timestamp(idx[-1])
+        )
         elapsed_days = (end_date - start_date).days
         if elapsed_days > 0:
             years = elapsed_days / 365.25
@@ -40,7 +49,9 @@ def compute_cagr(nav_series: pd.Series) -> float:
     return (end / start) ** (1.0 / years) - 1.0 if years > 0 else float("nan")
 
 
-def compute_annualized_volatility(nav_series: pd.Series, periods_per_year: int = 12) -> float:
+def compute_annualized_volatility(
+    nav_series: pd.Series, periods_per_year: int = 12
+) -> float:
     """Calcola la volatilità annualizzata con deviazione standard campionaria."""
     returns = compute_returns(nav_series)
     if returns.size < 2:
@@ -64,6 +75,7 @@ def compute_max_drawdown(nav_series: pd.Series) -> float:
     cum_max = np.maximum.accumulate(nav_values)
     drawdowns = nav_values / cum_max - 1.0
     return float(drawdowns.min())
+
 
 # Sharpe = (CAGR - Tasso Risk-Free) / Volatilità
 def compute_sharpe_ratio(

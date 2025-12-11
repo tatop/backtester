@@ -1,8 +1,41 @@
 from pathlib import Path
+from dataclasses import dataclass
+from datetime import datetime
+
 import numpy as np
 import pandas as pd
 import yfinance as yf
-from datetime import datetime, timedelta
+
+
+DEFAULT_LOOKBACK_DAYS = 365 * 10
+
+
+@dataclass
+class DownloadedSymbol:
+    symbol: str
+    path: Path
+    rows: int
+    start: pd.Timestamp
+    end: pd.Timestamp
+
+
+@dataclass
+class DownloadSummary:
+    successes: list[DownloadedSymbol]
+    errors: dict[str, str]
+
+
+def _coerce_date(
+    value: str | datetime | pd.Timestamp | None, fallback: pd.Timestamp
+) -> pd.Timestamp:
+    """Return a timezone-naive timestamp, using the fallback when value is None."""
+    if value is None:
+        return fallback
+
+    timestamp = pd.Timestamp(value)
+    if timestamp.tzinfo is not None:
+        timestamp = timestamp.tz_convert(None)
+    return timestamp.normalize()
 
 
 def load_price_series(symbol: str, data_dir: str = "data") -> pd.Series:
@@ -32,7 +65,9 @@ def load_price_series(symbol: str, data_dir: str = "data") -> pd.Series:
     if price_col is None:
         numeric_cols = [c for c in df.columns if np.issubdtype(df[c].dtype, np.number)]
         if not numeric_cols:
-            raise ValueError(f"Impossibile identificare la colonna prezzo in {csv_path}.")
+            raise ValueError(
+                f"Impossibile identificare la colonna prezzo in {csv_path}."
+            )
         price_col = numeric_cols[0]
 
     series = df[price_col].astype(float).sort_index()
@@ -68,45 +103,87 @@ def align_price_data(prices_df: pd.DataFrame, method: str = "inner") -> pd.DataF
     if method == "bfill":
         return df.bfill().dropna(how="all")
 
-    raise ValueError("Metodo di allineamento non riconosciuto. Usa 'inner', 'outer', 'ffill' o 'bfill'.")
+    raise ValueError(
+        "Metodo di allineamento non riconosciuto. Usa 'inner', 'outer', 'ffill' o 'bfill'."
+    )
 
 
-def download_yahoo(symbols: list[str], start: str | None = None, end: str | None = None, data_dir: str = "data") -> None:
+def download_yahoo(
+    symbols: list[str],
+    start: str | datetime | pd.Timestamp | None = None,
+    end: str | datetime | pd.Timestamp | None = None,
+    data_dir: str = "data",
+) -> DownloadSummary:
     """Scarica dati storici da Yahoo Finance e salva in CSV.
-    
+
     Args:
-        symbols: Lista di ticker (es: ['SPY', 'QQQ', 'IWM'])
-        start: Data inizio (formato YYYY-MM-DD), default: 10 anni fa
-        end: Data fine (formato YYYY-MM-DD), default: oggi
-        data_dir: Directory dove salvare i file CSV
+        symbols: Lista di ticker (es: ['SPY', 'QQQ', 'IWM']).
+        start: Data inizio (YYYY-MM-DD), default: 10 anni fa.
+        end: Data fine (YYYY-MM-DD), default: oggi.
+        data_dir: Directory dove salvare i file CSV.
     """
-    
-    
-    # Default dates
-    if end is None:
-        end = datetime.now().strftime("%Y-%m-%d")
-    if start is None:
-        start = (datetime.now() - timedelta(days=365*5)).strftime("%Y-%m-%d")
-    
-    # Create data directory if not exists
-    Path(data_dir).mkdir(parents=True, exist_ok=True)
-    
+
+    end_ts = _coerce_date(end, pd.Timestamp.now().normalize())
+    start_ts = _coerce_date(start, end_ts - pd.Timedelta(days=DEFAULT_LOOKBACK_DAYS))
+    if start_ts >= end_ts:
+        raise ValueError("La data di inizio deve essere precedente alla data di fine.")
+
+    data_path = Path(data_dir)
+    data_path.mkdir(parents=True, exist_ok=True)
+
+    successes: list[DownloadedSymbol] = []
+    errors: dict[str, str] = {}
+
     for symbol in symbols:
-        print(f"Scaricamento {symbol} da {start} a {end}...")
+        print(f"Scaricamento {symbol} da {start_ts.date()} a {end_ts.date()}...")
         try:
-            data = yf.download(symbol, start=start, end=end, progress=False)
+            data = yf.download(
+                symbol,
+                start=start_ts.strftime("%Y-%m-%d"),
+                end=end_ts.strftime("%Y-%m-%d"),
+                progress=False,
+                group_by="ticker",
+                threads=False,
+            )
             if data.empty:
-                print(f"⚠️ Nessun dato trovato per {symbol}")
-                continue
-            
-            # Salva solo Date e Close
-            df = pd.DataFrame({
-                'Date': data.index,
-                'Close': data['Close'].values
-            })
-            
-            csv_path = Path(data_dir) / f"{symbol}.csv"
-            df.to_csv(csv_path, index=False)
-            print(f"✓ Salvato: {csv_path} ({len(df)} righe)")
+                raise ValueError("Nessun dato trovato.")
+
+            price_col = (
+                "Adj Close"
+                if "Adj Close" in data.columns
+                else "Close"
+                if "Close" in data.columns
+                else None
+            )
+            if price_col is None:
+                raise ValueError("Colonna prezzo non presente (Close/Adj Close).")
+
+            prices = data[price_col].dropna()
+            if prices.empty:
+                raise ValueError("Colonna prezzo vuota dopo la pulizia.")
+
+            index = pd.to_datetime(prices.index)
+            if getattr(index, "tz", None) is not None:
+                index = index.tz_convert(None)
+            prices.index = index
+
+            prices = prices[~prices.index.duplicated(keep="first")].sort_index()
+            cleaned = pd.DataFrame({"Date": prices.index, "Close": prices.values})
+
+            csv_path = data_path / f"{symbol}.csv"
+            cleaned.to_csv(csv_path, index=False)
+            successes.append(
+                DownloadedSymbol(
+                    symbol=symbol,
+                    path=csv_path,
+                    rows=len(cleaned),
+                    start=cleaned["Date"].iloc[0],
+                    end=cleaned["Date"].iloc[-1],
+                )
+            )
+            print(f"✓ Salvato: {csv_path} ({len(cleaned)} righe)")
         except Exception as e:
-            print(f"✗ Errore scaricamento {symbol}: {e}")
+            errors[symbol] = str(e)
+            print(f"✗ Errore scaricamento {symbol}: {errors[symbol]}")
+
+    return DownloadSummary(successes=successes, errors=errors)
