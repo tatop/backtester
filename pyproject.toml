@@ -12,6 +12,7 @@ dependencies = [
     "bokeh>=3.8.1",
     "numpy>=2.3.5",
     "pandas>=2.3.3",
+    "yfinance>=0.2.0",
 ]
 
 [tool.hatch.build.targets.wheel]

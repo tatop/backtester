@@ -1,6 +1,9 @@
 from pathlib import Path
 import numpy as np
 import pandas as pd
+import yfinance as yf
+from datetime import datetime, timedelta
+
 
 def load_price_series(symbol: str, data_dir: str = "data") -> pd.Series:
     """Carica la serie dei prezzi per un singolo ETF da file CSV."""
@@ -66,3 +69,44 @@ def align_price_data(prices_df: pd.DataFrame, method: str = "inner") -> pd.DataF
         return df.bfill().dropna(how="all")
 
     raise ValueError("Metodo di allineamento non riconosciuto. Usa 'inner', 'outer', 'ffill' o 'bfill'.")
+
+
+def download_yahoo(symbols: list[str], start: str | None = None, end: str | None = None, data_dir: str = "data") -> None:
+    """Scarica dati storici da Yahoo Finance e salva in CSV.
+    
+    Args:
+        symbols: Lista di ticker (es: ['SPY', 'QQQ', 'IWM'])
+        start: Data inizio (formato YYYY-MM-DD), default: 10 anni fa
+        end: Data fine (formato YYYY-MM-DD), default: oggi
+        data_dir: Directory dove salvare i file CSV
+    """
+    
+    
+    # Default dates
+    if end is None:
+        end = datetime.now().strftime("%Y-%m-%d")
+    if start is None:
+        start = (datetime.now() - timedelta(days=365*5)).strftime("%Y-%m-%d")
+    
+    # Create data directory if not exists
+    Path(data_dir).mkdir(parents=True, exist_ok=True)
+    
+    for symbol in symbols:
+        print(f"Scaricamento {symbol} da {start} a {end}...")
+        try:
+            data = yf.download(symbol, start=start, end=end, progress=False)
+            if data.empty:
+                print(f"⚠️ Nessun dato trovato per {symbol}")
+                continue
+            
+            # Salva solo Date e Close
+            df = pd.DataFrame({
+                'Date': data.index,
+                'Close': data['Close'].values
+            })
+            
+            csv_path = Path(data_dir) / f"{symbol}.csv"
+            df.to_csv(csv_path, index=False)
+            print(f"✓ Salvato: {csv_path} ({len(df)} righe)")
+        except Exception as e:
+            print(f"✗ Errore scaricamento {symbol}: {e}")

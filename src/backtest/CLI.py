@@ -2,7 +2,7 @@ import argparse
 
 from backtest.metrics import compute_all_metrics
 from backtest.plotting import plot_backtest_dashboard
-from backtest.data_loader import load_multiple_symbols, align_price_data
+from backtest.data_loader import load_multiple_symbols, align_price_data, download_yahoo
 from backtest.portfolio import _build_weights, PortfolioConfig
 from backtest.engine import BacktestEngine, BacktestParams
 
@@ -32,11 +32,21 @@ def parse_args() -> argparse.Namespace:
         help="Metodo di allineamento serie (default: inner).",
     )
     parser.add_argument("--plot", action="store_true", help="Mostra i grafici Bokeh.")
+    parser.add_argument("--download", action="store_true", help="Scarica dati da Yahoo Finance prima del backtest.")
+    parser.add_argument("--start", type=str, default=None, help="Data inizio download (YYYY-MM-DD, default: 10 anni fa).")
+    parser.add_argument("--end", type=str, default=None, help="Data fine download (YYYY-MM-DD, default: oggi).")
     return parser.parse_args()
 
 
 def run_cli_backtest(args: argparse.Namespace) -> None:
     symbols = args.symbols or ["SPY", "STOXX50"]
+    
+    # Download data if requested
+    if args.download:
+        print(f"⬇️  Scaricamento dati per {symbols}...")
+        download_yahoo(symbols, start=args.start, end=args.end, data_dir=args.data_dir)
+        print()
+    
     weights = _build_weights(symbols, args.weights)
 
     prices = load_multiple_symbols(symbols, data_dir=args.data_dir)
