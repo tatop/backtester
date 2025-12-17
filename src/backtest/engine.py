@@ -9,6 +9,8 @@ import numpy as np
 class BacktestParams:
     rebalance_frequency: str = "none"  # "none", "monthly", "quarterly", "yearly"
     transaction_cost: float = 0.0  # es. 0.001 = 0.1% per trade
+    start_date: Optional[pd.Timestamp | str] = None
+    end_date: Optional[pd.Timestamp | str] = None
 
 
 @dataclass
@@ -17,6 +19,7 @@ class BacktestResult:
     weights_over_time: Optional[pd.DataFrame] = None
     trades: Optional[pd.DataFrame] = None
     metrics: Optional[Dict[str, float]] = None
+    benchmark_nav_series: Optional[pd.Series] = None
 
 
 class BacktestEngine:
@@ -25,6 +28,8 @@ class BacktestEngine:
         prices_df: pd.DataFrame,
         portfolio_config,
         params: BacktestParams,
+        benchmark_prices: Optional[pd.Series] = None,
+        benchmark_label: Optional[str] = None,
     ) -> None:
         if prices_df.empty:
             raise ValueError("Il DataFrame dei prezzi è vuoto.")
@@ -37,9 +42,45 @@ class BacktestEngine:
             raise ValueError(f"Mancano i prezzi per: {', '.join(sorted(missing))}")
 
         self.symbols = list(self.weights.keys())
-        self.prices_df = prices_df.sort_index()[self.symbols]
         self.params = params
         self.initial_capital = float(portfolio_config.initial_capital)
+
+        # 1. Filtro temporale
+        full_idx = prices_df.sort_index().index
+        data_start, data_end = full_idx[0], full_idx[-1]
+
+        req_start = pd.to_datetime(params.start_date) if params.start_date else data_start
+        req_end = pd.to_datetime(params.end_date) if params.end_date else data_end
+
+        # Clipping
+        actual_start = max(req_start, data_start)
+        actual_end = min(req_end, data_end)
+
+        if actual_start > actual_end:
+            raise ValueError(
+                f"Intervallo date non valido: richiesto {req_start.date()} - {req_end.date()}, "
+                f"disponibile {data_start.date()} - {data_end.date()}"
+            )
+
+        self.prices_df = prices_df.sort_index().loc[actual_start:actual_end, self.symbols]
+
+        if self.prices_df.empty:
+            raise ValueError("Il DataFrame dei prezzi è vuoto dopo il filtro temporale.")
+
+        # 2. Benchmark
+        if benchmark_prices is not None:
+            aligned_benchmark = benchmark_prices.sort_index().reindex(
+                self.prices_df.index
+            )
+            aligned_benchmark = aligned_benchmark.ffill().bfill()
+            self.benchmark_prices = aligned_benchmark
+        else:
+            self.benchmark_prices = None
+        self.benchmark_label = (
+            benchmark_label
+            if benchmark_label
+            else (benchmark_prices.name if benchmark_prices is not None else None)
+        )
 
         self.positions = np.zeros(len(self.symbols), dtype=float)
         self.current_nav = 0.0
@@ -73,11 +114,18 @@ class BacktestEngine:
             else None
         )
         metrics = {"final_nav": self.nav_history[-1]} if self.nav_history else None
+        benchmark_nav = (
+            self._compute_benchmark_nav()
+            if self.benchmark_prices is not None
+            else None
+        )
+
         return BacktestResult(
             nav_series=nav_series,
             weights_over_time=weights_df,
             trades=trades_df,
             metrics=metrics,
+            benchmark_nav_series=benchmark_nav,
         )
 
     def _initialize_positions(self) -> None:
@@ -155,3 +203,18 @@ class BacktestEngine:
             dict(zip(self.symbols, (self.positions * prices) / self.current_nav))
         )
         self.trades_history.append({"date": date, **dict(zip(self.symbols, trades))})
+
+    def _compute_benchmark_nav(self) -> Optional[pd.Series]:
+        if self.benchmark_prices is None:
+            return None
+
+        prices = self.benchmark_prices
+        if prices.empty:
+            return None
+
+        investable = self.initial_capital * (1 - self.params.transaction_cost)
+        shares = investable / float(prices.iloc[0])
+        nav = prices.to_numpy(dtype=float) * shares
+        benchmark_series = pd.Series(nav, index=prices.index)
+        benchmark_series.name = self.benchmark_label or "Benchmark"
+        return benchmark_series

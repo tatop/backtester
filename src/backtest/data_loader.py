@@ -7,7 +7,7 @@ import pandas as pd
 import yfinance as yf
 
 
-DEFAULT_LOOKBACK_DAYS = 365 * 10
+DEFAULT_LOOKBACK_DAYS = 365 * 5
 
 
 @dataclass
@@ -141,24 +141,16 @@ def download_yahoo(
                 symbol,
                 start=start_ts.strftime("%Y-%m-%d"),
                 end=end_ts.strftime("%Y-%m-%d"),
+                interval="1mo",
                 progress=False,
-                group_by="ticker",
+                group_by="column",
                 threads=False,
-            )
+            )['Close']
             if data.empty:
                 raise ValueError("Nessun dato trovato.")
 
-            price_col = (
-                "Adj Close"
-                if "Adj Close" in data.columns
-                else "Close"
-                if "Close" in data.columns
-                else None
-            )
-            if price_col is None:
-                raise ValueError("Colonna prezzo non presente (Close/Adj Close).")
-
-            prices = data[price_col].dropna()
+            print(data.columns.tolist())
+            prices = data[symbol].dropna()
             if prices.empty:
                 raise ValueError("Colonna prezzo vuota dopo la pulizia.")
 

@@ -1,11 +1,12 @@
 import argparse
 from pathlib import Path
 
-from backtest.metrics import compute_all_metrics
+from backtest.api import (
+    BacktestRequest,
+    download_prices,
+    run_backtest,
+)
 from backtest.plotting import plot_backtest_dashboard
-from backtest.data_loader import load_multiple_symbols, align_price_data, download_yahoo
-from backtest.portfolio import _build_weights, PortfolioConfig
-from backtest.engine import BacktestEngine, BacktestParams
 
 
 def parse_args() -> argparse.Namespace:
@@ -47,6 +48,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--plot", action="store_true", help="Mostra i grafici Bokeh.")
     parser.add_argument(
+        "--benchmark",
+        default="SPY",
+        help="Ticker benchmark per confronto (default: SPY).",
+    )
+    parser.add_argument(
         "--download",
         action="store_true",
         help="Scarica dati da Yahoo Finance prima del backtest.",
@@ -55,13 +61,25 @@ def parse_args() -> argparse.Namespace:
         "--start",
         type=str,
         default=None,
-        help="Data inizio download (YYYY-MM-DD, default: 10 anni fa).",
+        help="Data inizio download (YYYY-MM-DD, default: 5 anni fa).",
     )
     parser.add_argument(
         "--end",
         type=str,
         default=None,
         help="Data fine download (YYYY-MM-DD, default: oggi).",
+    )
+    parser.add_argument(
+        "--bt-start",
+        type=str,
+        default=None,
+        help="Data inizio backtest (YYYY-MM-DD, default: inizio dati).",
+    )
+    parser.add_argument(
+        "--bt-end",
+        type=str,
+        default=None,
+        help="Data fine backtest (YYYY-MM-DD, default: fine dati).",
     )
     return parser.parse_args()
 
@@ -73,7 +91,7 @@ def run_cli_backtest(args: argparse.Namespace) -> None:
     if args.download:
         print(f"⬇️  Scaricamento dati per {symbols}...")
         try:
-            summary = download_yahoo(
+            summary = download_prices(
                 symbols, start=args.start, end=args.end, data_dir=args.data_dir
             )
         except ValueError as exc:
@@ -92,29 +110,45 @@ def run_cli_backtest(args: argparse.Namespace) -> None:
     if missing_files:
         raise SystemExit(f"Mancano i file CSV per: {', '.join(missing_files)}")
 
-    weights = _build_weights(symbols, args.weights)
-
-    prices = load_multiple_symbols(symbols, data_dir=args.data_dir)
-    prices = align_price_data(prices, method=args.align)
-
-    engine = BacktestEngine(
-        prices_df=prices,
-        portfolio_config=PortfolioConfig(weights=weights, initial_capital=args.initial),
-        params=BacktestParams(
-            rebalance_frequency=args.rebalance, transaction_cost=args.transaction_cost
-        ),
+    # Build request using the stable API
+    request = BacktestRequest(
+        symbols=symbols,
+        weights=args.weights,
+        initial_capital=args.initial,
+        rebalance_frequency=args.rebalance,
+        transaction_cost=args.transaction_cost,
+        align_method=args.align,
+        data_dir=args.data_dir,
+        benchmark=args.benchmark,
+        start_date=args.bt_start,
+        end_date=args.bt_end,
     )
-    result = engine.run()
 
-    metrics = compute_all_metrics(result.nav_series)
+    response = run_backtest(request)
+
+    # Print metrics using formatted output
+    formatted = response.metrics.as_formatted_dict()
     print("Backtest Results")
     print("----------------")
-    for k, v in metrics.items():
+    for k, v in formatted.items():
         print(f"{k.replace('_', ' ').title()}: {v}")
-    print(f"Final NAV: {result.metrics['final_nav']:.2f}")
+    print(f"Final NAV: {response.final_nav:.2f}")
+
+    if response.benchmark_nav_series is not None and response.benchmark_metrics is not None:
+        bench_formatted = response.benchmark_metrics.as_formatted_dict()
+        print()
+        print(f"Benchmark ({response.benchmark_nav_series.name})")
+        print("------------------------")
+        for k, v in bench_formatted.items():
+            print(f"{k.replace('_', ' ').title()}: {v}")
+        print(f"Final NAV: {response.benchmark_nav_series.iloc[-1]:.2f}")
 
     if args.plot:
-        plot_backtest_dashboard(result.nav_series, result.weights_over_time)
+        plot_backtest_dashboard(
+            response.nav_series,
+            weights_df=response.weights_over_time,
+            benchmark_series=response.benchmark_nav_series,
+        )
 
 
 def main() -> None:
